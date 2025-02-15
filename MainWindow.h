@@ -1,10 +1,9 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
-#include <Windows.h>
-#include <CommCtrl.h>
+#include <windows.h>
 #include <memory>
-#include <unordered_set>
+#include <string>
 #include "ISO.h"
 
 class MainWindow {
@@ -21,19 +20,19 @@ private:
 
     void SetupMenu();
     void CreateToolbar();
-    void CreateTreeView();
-    void CreateListView();
+    HWND CreateTreeView();
+    HWND CreateListView();
+
+    LRESULT HandleCommand(WPARAM wParam, LPARAM lParam);
+    LRESULT HandleNotify(LPARAM lParam);
+    LRESULT HandleResize();
+
     void LoadIsoAndDisplayTree(const std::wstring& isoPath);
-    void BuildDirectoryTreeIterative(const std::unordered_map<std::string, DirectoryRecord>& directoryRecords, const std::wstring& parentPath, HTREEITEM parentNode, std::unordered_set<std::wstring>& visitedDirectories, const std::wstring& isoName);
-    void BuildDirectoryTree(const std::unordered_map<std::string, DirectoryRecord>& directoryRecords, const std::wstring& parentPath, HTREEITEM parentNode, std::unordered_set<std::wstring>& visitedDirectories, const std::wstring& isoName);
-    void ExtractAll();
-    void PopulateTreeView();
-    void PopulateListView(const std::wstring& directoryPath);
 
-    static std::wstring stringToWstring(const std::string& str);
-    static std::string wstringToString(const std::wstring& wstr);
-    static std::wstring FormatFileTime(const std::time_t& time);
+    std::wstring stringToWstring(const std::string& str);
+    std::string wstringToString(const std::wstring& wstr);
 
+private:
     HINSTANCE hInstance_;
     HWND hwnd_;
     HWND hwndToolbar_;

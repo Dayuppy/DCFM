@@ -15,4 +15,7 @@
 #define ID_EDIT_PASTE 9006
 #define ID_HELP_ABOUT 9007
 
+#define IDC_TREEVIEW 201
+#define IDC_LISTVIEW 202
+
 #endif // RESOURCE_H

@@ -1,4 +1,6 @@
 #include "Bytes.h"
+#include <algorithm>
+#include <fstream>
 
 namespace Bytes {
 

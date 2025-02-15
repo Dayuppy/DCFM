@@ -1,42 +1,31 @@
-#include "MainWindow.h"
-#include "ISO.h"
+#include "MainWindowLayout.h"
+#include "resource.h"
 #include <CommCtrl.h>
 #include <Shlwapi.h>
-#include <filesystem>
-#include "resource.h"
+#include <shlobj.h>
 
-void MainWindow::SetupMenu() {
+void MainWindowLayout::SetupMenu(HWND hwnd) {
     HMENU hMenu = CreateMenu();
     HMENU hFileMenu = CreatePopupMenu();
-    HMENU hEditMenu = CreatePopupMenu();
-    HMENU hViewMenu = CreatePopupMenu();
     HMENU hHelpMenu = CreatePopupMenu();
 
     AppendMenu(hFileMenu, MF_STRING, ID_FILE_OPEN, L"&Open");
-    AppendMenu(hFileMenu, MF_STRING, ID_FILE_SAVE, L"&Save");
-    AppendMenu(hFileMenu, MF_STRING, ID_FILE_EXIT, L"&Exit");
-
-    AppendMenu(hEditMenu, MF_STRING, ID_EDIT_UNDO, L"&Undo");
-    AppendMenu(hEditMenu, MF_STRING, ID_EDIT_REDO, L"&Redo");
-    AppendMenu(hEditMenu, MF_STRING, ID_EDIT_COPY, L"&Copy");
-    AppendMenu(hEditMenu, MF_STRING, ID_EDIT_PASTE, L"&Paste");
+    AppendMenu(hFileMenu, MF_STRING, ID_FILE_EXIT, L"E&xit");
 
     AppendMenu(hHelpMenu, MF_STRING, ID_HELP_ABOUT, L"&About");
 
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hFileMenu, L"&File");
-    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hEditMenu, L"&Edit");
-    AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hViewMenu, L"&View");
     AppendMenu(hMenu, MF_POPUP, (UINT_PTR)hHelpMenu, L"&Help");
 
-    SetMenu(hwnd_, hMenu);
+    SetMenu(hwnd, hMenu);
 }
 
-void MainWindow::CreateToolbar() {
-    hwndToolbar_ = CreateWindowEx(0, TOOLBARCLASSNAME, nullptr,
+HWND MainWindowLayout::CreateToolbar(HWND hwnd, HINSTANCE hInstance) {
+    HWND hwndToolbar = CreateWindowEx(0, TOOLBARCLASSNAME, nullptr,
         WS_CHILD | WS_VISIBLE | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS | CCS_TOP, 0, 0, 0, 0,
-        hwnd_, nullptr, hInstance_, nullptr);
+        hwnd, nullptr, hInstance, nullptr);
 
-    SendMessage(hwndToolbar_, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTON), 0);
+    SendMessage(hwndToolbar, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTON), 0);
 
     TBBUTTON tbb[6] = { 0 };
 
@@ -79,135 +68,62 @@ void MainWindow::CreateToolbar() {
     TBADDBITMAP tbab;
     tbab.hInst = HINST_COMMCTRL;
     tbab.nID = IDB_STD_SMALL_COLOR;
-    SendMessage(hwndToolbar_, TB_ADDBITMAP, 0, (LPARAM)&tbab);
-    SendMessage(hwndToolbar_, TB_ADDBUTTONS, sizeof(tbb) / sizeof(TBBUTTON), (LPARAM)&tbb);
+    SendMessage(hwndToolbar, TB_ADDBITMAP, 0, (LPARAM)&tbab);
+    SendMessage(hwndToolbar, TB_ADDBUTTONS, sizeof(tbb) / sizeof(TBBUTTON), (LPARAM)&tbb);
 
     // Finally, tell the toolbar to size itself based on the added buttons:
-    SendMessage(hwndToolbar_, TB_AUTOSIZE, 0, 0);
+    SendMessage(hwndToolbar, TB_AUTOSIZE, 0, 0);
+
+    return hwndToolbar;
 }
 
-void MainWindow::CreateTreeView() {
-    hwndTreeView_ = CreateWindowEx(0, WC_TREEVIEW, L"Tree View",
+HWND MainWindowLayout::CreateTreeView(HWND hwnd, HINSTANCE hInstance) {
+    return CreateWindowEx(0, WC_TREEVIEW, L"Tree View",
         WS_CHILD | WS_VISIBLE | WS_BORDER | TVS_HASLINES | TVS_LINESATROOT | TVS_HASBUTTONS,
         0, 0, 0, 0,
-        hwnd_, nullptr, hInstance_, nullptr);
+        hwnd, (HMENU)IDC_TREEVIEW, hInstance, nullptr);
 }
 
-void MainWindow::CreateListView() {
-    hwndListView_ = CreateWindowEx(0, WC_LISTVIEW, L"List View",
+HWND MainWindowLayout::CreateListView(HWND hwnd, HINSTANCE hInstance) {
+    HWND hwndListView = CreateWindowEx(0, WC_LISTVIEW, L"List View",
         WS_CHILD | WS_VISIBLE | WS_BORDER | LVS_REPORT | LVS_EDITLABELS,
         0, 0, 0, 0,
-        hwnd_, nullptr, hInstance_, nullptr);
+        hwnd, (HMENU)IDC_LISTVIEW, hInstance, nullptr);
 
     LVCOLUMN lvc;
     lvc.mask = LVCF_TEXT | LVCF_WIDTH | LVCF_SUBITEM;
     lvc.cx = 100;
 
     lvc.pszText = const_cast<LPWSTR>(L"File Name");
-    ListView_InsertColumn(hwndListView_, 0, &lvc);
+    ListView_InsertColumn(hwndListView, 0, &lvc);
 
     lvc.pszText = const_cast<LPWSTR>(L"File Path");
-    ListView_InsertColumn(hwndListView_, 1, &lvc);
+    ListView_InsertColumn(hwndListView, 1, &lvc);
 
     lvc.pszText = const_cast<LPWSTR>(L"File Size");
-    ListView_InsertColumn(hwndListView_, 2, &lvc);
+    ListView_InsertColumn(hwndListView, 2, &lvc);
 
     lvc.pszText = const_cast<LPWSTR>(L"Date Created");
-    ListView_InsertColumn(hwndListView_, 3, &lvc);
+    ListView_InsertColumn(hwndListView, 3, &lvc);
 
     lvc.pszText = const_cast<LPWSTR>(L"Date Modified");
-    ListView_InsertColumn(hwndListView_, 4, &lvc);
+    ListView_InsertColumn(hwndListView, 4, &lvc);
+
+    return hwndListView;
 }
 
-void MainWindow::PopulateTreeView() {
-    TreeView_DeleteAllItems(hwndTreeView_);
+LRESULT MainWindowLayout::HandleResize(HWND hwnd, HWND hwndToolbar, HWND hwndTreeView, HWND hwndListView) {
+    if (hwndToolbar && hwndTreeView && hwndListView) {
+        RECT rcClient;
+        GetClientRect(hwnd, &rcClient);
 
-    std::wstring isoName = stringToWstring(iso_->GetFileName());
-    TVINSERTSTRUCT tvis = { 0 };
-    tvis.hParent = TVI_ROOT;
-    tvis.hInsertAfter = TVI_LAST;
-    tvis.item.mask = TVIF_TEXT;
-    tvis.item.pszText = const_cast<LPWSTR>(isoName.c_str());
-    HTREEITEM hRoot = TreeView_InsertItem(hwndTreeView_, &tvis);
+        RECT rcToolbar;
+        GetWindowRect(hwndToolbar, &rcToolbar);
+        int toolbarHeight = rcToolbar.bottom - rcToolbar.top;
 
-    std::unordered_map<std::wstring, HTREEITEM> treeItems;
-    treeItems[isoName] = hRoot;
-
-    for (const auto& recordPair : iso_->GetDirectoryRecords()) {
-        const auto& recordPathStr = recordPair.first;
-        const auto& record = recordPair.second;
-
-        if (record.IsFile()) continue;
-
-        std::wstring path = stringToWstring(recordPathStr);
-        std::replace(path.begin(), path.end(), L'/', L'\\');
-
-        std::wstring fullPath = isoName;
-        HTREEITEM hParent = hRoot;
-
-        size_t start = 0;
-        while (true) {
-            size_t pos = path.find(L'\\', start);
-            std::wstring folder = (pos == std::wstring::npos) ? path.substr(start) : path.substr(start, pos - start);
-
-            if (folder.empty()) break;
-
-            fullPath += L"\\" + folder;
-            if (treeItems.find(fullPath) == treeItems.end()) {
-                TVINSERTSTRUCT childTvis = { 0 };
-                childTvis.hParent = hParent;
-                childTvis.hInsertAfter = TVI_SORT;
-                childTvis.item.mask = TVIF_TEXT;
-                childTvis.item.pszText = const_cast<LPWSTR>(folder.c_str());
-                HTREEITEM hItem = TreeView_InsertItem(hwndTreeView_, &childTvis);
-                treeItems[fullPath] = hItem;
-                hParent = hItem;
-            }
-            else {
-                hParent = treeItems[fullPath];
-            }
-
-            if (pos == std::wstring::npos) break;
-            start = pos + 1;
-        }
+        MoveWindow(hwndToolbar, 0, 0, rcClient.right, toolbarHeight, TRUE);
+        MoveWindow(hwndTreeView, 0, toolbarHeight, rcClient.right / 3, rcClient.bottom - toolbarHeight, TRUE);
+        MoveWindow(hwndListView, rcClient.right / 3, toolbarHeight, rcClient.right - rcClient.right / 3, rcClient.bottom - toolbarHeight, TRUE);
     }
-}
-
-void MainWindow::PopulateListView(const std::wstring& directoryPath) {
-    ListView_DeleteAllItems(hwndListView_);
-
-    LVITEM lvi;
-    lvi.mask = LVIF_TEXT;
-    lvi.iItem = 0;
-
-    for (const auto& recordPair : iso_->GetDirectoryRecords()) {
-        const auto& recordPath = recordPair.first;
-        const auto& record = recordPair.second;
-
-        std::wstring parentPath = std::filesystem::path(std::wstring(recordPath.begin(), recordPath.end())).parent_path().wstring();
-        if (parentPath == directoryPath && record.IsFile()) {
-            lvi.iSubItem = 0;
-            lvi.pszText = const_cast<LPWSTR>(std::filesystem::path(std::wstring(recordPath.begin(), recordPath.end())).filename().c_str());
-            ListView_InsertItem(hwndListView_, &lvi);
-
-            lvi.iSubItem = 1;
-            lvi.pszText = const_cast<LPWSTR>(std::wstring(recordPath.begin(), recordPath.end()).c_str());
-            ListView_SetItem(hwndListView_, &lvi);
-
-            lvi.iSubItem = 2;
-            lvi.pszText = const_cast<LPWSTR>(std::to_wstring(record.GetSize()).c_str());
-            ListView_SetItem(hwndListView_, &lvi);
-
-            std::wstring dateTime = stringToWstring(record.GetFormattedDateTime());
-            lvi.iSubItem = 3;
-            lvi.pszText = const_cast<LPWSTR>(dateTime.c_str());
-            ListView_SetItem(hwndListView_, &lvi);
-
-            lvi.iSubItem = 4;
-            lvi.pszText = const_cast<LPWSTR>(dateTime.c_str());
-            ListView_SetItem(hwndListView_, &lvi);
-
-            lvi.iItem++;
-        }
-    }
+    return 0;
 }

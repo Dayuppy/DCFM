@@ -1,8 +1,11 @@
 ﻿#include "MainWindow.h"
 #include "resource.h"
+#include "MainWindowLayout.h"
+#include "MainWindowUtilities.h"
+#include "MainWindowEventHandler.h"
 #include <CommCtrl.h>
 #include <Shlwapi.h>
-#include <shlobj.h> // Required for SHBrowseForFolder, SHGetPathFromIDList, etc.
+#include <shlobj.h>
 
 #pragma comment(lib, "Shell32.lib")
 #pragma comment(lib, "Comctl32.lib")
@@ -48,14 +51,15 @@ bool MainWindow::Create(LPCWSTR windowName, int width, int height) {
 
     SetupMenu();
     CreateToolbar();
-    CreateTreeView();
-    CreateListView();
+    hwndTreeView_ = CreateTreeView();
+    hwndListView_ = CreateListView();
 
     return true;
 }
 
 void MainWindow::Show(int nCmdShow) {
     ShowWindow(hwnd_, nCmdShow);
+    UpdateWindow(hwnd_);
 }
 
 LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
@@ -78,4 +82,75 @@ LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPA
     else {
         return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
+}
+
+LRESULT MainWindow::HandleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+    case WM_CREATE:
+        break;
+    case WM_COMMAND:
+        return HandleCommand(wParam, lParam);
+    case WM_NOTIFY:
+        return HandleNotify(lParam);
+    case WM_SIZE:
+        return HandleResize();
+    case WM_DESTROY:
+        PostQuitMessage(0);
+        break;
+    default:
+        return DefWindowProc(hwnd_, uMsg, wParam, lParam);
+    }
+
+    return 0;
+}
+
+void MainWindow::SetupMenu() {
+    MainWindowLayout::SetupMenu(hwnd_);
+}
+
+void MainWindow::CreateToolbar() {
+    hwndToolbar_ = MainWindowLayout::CreateToolbar(hwnd_, hInstance_);
+}
+
+HWND MainWindow::CreateTreeView() {
+    return MainWindowLayout::CreateTreeView(hwnd_, hInstance_);
+}
+
+HWND MainWindow::CreateListView() {
+    return MainWindowLayout::CreateListView(hwnd_, hInstance_);
+}
+
+LRESULT MainWindow::HandleCommand(WPARAM wParam, LPARAM lParam) {
+    return MainWindowEventHandler::HandleCommand(hwnd_, wParam, lParam, hwndTreeView_, hwndListView_, iso_);
+}
+
+LRESULT MainWindow::HandleNotify(LPARAM lParam) {
+    LPNMHDR pnmh = (LPNMHDR)lParam;
+    if (pnmh->hwndFrom == hwndTreeView_ && pnmh->code == TVN_SELCHANGED) {
+        LPNMTREEVIEW pnmtv = (LPNMTREEVIEW)lParam;
+        HTREEITEM hSelectedItem = pnmtv->itemNew.hItem;
+
+        // Get the full path of the selected folder
+        std::wstring folderPath = MainWindowUtilities::GetFullPathFromTreeViewItem(hwndTreeView_, hSelectedItem);
+
+        // Populate the ListView with the contents of the selected folder
+        MainWindowUtilities::PopulateListView(hwndListView_, iso_, folderPath);
+    }
+    return 0;
+}
+
+LRESULT MainWindow::HandleResize() {
+    return MainWindowLayout::HandleResize(hwnd_, hwndToolbar_, hwndTreeView_, hwndListView_);
+}
+
+void MainWindow::LoadIsoAndDisplayTree(const std::wstring& isoPath) {
+    MainWindowUtilities::LoadIsoAndDisplayTree(hwnd_, hwndTreeView_, hwndListView_, iso_, isoPath);
+}
+
+std::wstring MainWindow::stringToWstring(const std::string& str) {
+    return MainWindowUtilities::stringToWstring(str);
+}
+
+std::string MainWindow::wstringToString(const std::wstring& wstr) {
+    return MainWindowUtilities::wstringToString(wstr);
 }

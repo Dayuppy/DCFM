@@ -7,6 +7,7 @@
 #include "ISO9660.h"
 #include "HED.h"
 #include "HD2.h"
+#include "DirectoryRecord.h"
 
 namespace Files {
 

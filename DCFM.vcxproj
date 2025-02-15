@@ -154,6 +154,9 @@
     <ClInclude Include="ISO.h" />
     <ClInclude Include="ISO9660.h" />
     <ClInclude Include="MainWindow.h" />
+    <ClInclude Include="MainWindowEventHandler.h" />
+    <ClInclude Include="MainWindowLayout.h" />
+    <ClInclude Include="MainWindowUtilities.h" />
     <ClInclude Include="PathTableEntry.h" />
     <ClInclude Include="PrimaryVolumeDescriptor.h" />
     <ClInclude Include="Resource.h" />
