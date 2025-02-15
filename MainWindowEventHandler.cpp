@@ -33,7 +33,7 @@ LRESULT MainWindowEventHandler::HandleCommand(HWND hwnd, WPARAM wParam, LPARAM l
         PostMessage(hwnd, WM_CLOSE, 0, 0);
         break;
     case ID_HELP_ABOUT:
-        MessageBox(hwnd, L"ISO Extractor\nVersion 1.0", L"About", MB_OK);
+        MessageBox(hwnd, L"Dark Cloud File Manager\nVersion 1.0", L"About", MB_OK);
         break;
     default:
         return DefWindowProc(hwnd, WM_COMMAND, wParam, lParam);

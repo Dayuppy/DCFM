@@ -1,15 +1,13 @@
 #include "ISO.h"
+#include "DirectoryRecord.h"
 #include <iostream>
 #include <stdexcept>
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
-#include <stack>
 #include <unordered_set>
-#include <regex>
-#include <locale>
-#include <codecvt>
+#include <algorithm>
 
 ISO::ISO(const std::string& isoPath) : reader(isoPath, std::ios::binary), isoFileName(isoPath) {
     if (!reader.is_open()) {
@@ -33,45 +31,17 @@ void ISO::ReadPrimaryVolumeDescriptor() {
     const int logicalBlockSize = 2048;
 
     reader.seekg(primaryVolumeDescriptorLBA * logicalBlockSize, std::ios::beg);
+    reader.read(reinterpret_cast<char*>(&PrimaryVolumeDescriptor), sizeof(PrimaryVolumeDescriptor));
 
-    PrimaryVolumeDescriptor.Header.Type = reader.get();
-    reader.read(PrimaryVolumeDescriptor.Header.Identifier, 5);
-    PrimaryVolumeDescriptor.Header.Version = reader.get();
-
-    reader.ignore(1);
-
-    reader.read(PrimaryVolumeDescriptor.SystemIdentifier, 32);
-    reader.read(PrimaryVolumeDescriptor.VolumeIdentifier, 32);
-
-    reader.ignore(8);
-
-    PrimaryVolumeDescriptor.VolumeSpaceSize.LittleEndian = Bytes::ReadUInt32(reader);
-    PrimaryVolumeDescriptor.VolumeSpaceSize.BigEndian = Bytes::ReadUInt32BigEndian(reader);
-
-    reader.ignore(32);
-
-    PrimaryVolumeDescriptor.VolumeSetSize.LittleEndian = Bytes::ReadUInt16(reader);
-    PrimaryVolumeDescriptor.VolumeSetSize.BigEndian = Bytes::ReadUInt16BigEndian(reader);
-
-    PrimaryVolumeDescriptor.VolumeSequenceNumber.LittleEndian = Bytes::ReadUInt16(reader);
-    PrimaryVolumeDescriptor.VolumeSequenceNumber.BigEndian = Bytes::ReadUInt16BigEndian(reader);
-
-    PrimaryVolumeDescriptor.LogicalBlockSize.LittleEndian = Bytes::ReadUInt16(reader);
-    PrimaryVolumeDescriptor.LogicalBlockSize.BigEndian = Bytes::ReadUInt16BigEndian(reader);
-
-    PrimaryVolumeDescriptor.PathTableSize.LittleEndian = Bytes::ReadUInt32(reader);
-    PrimaryVolumeDescriptor.PathTableSize.BigEndian = Bytes::ReadUInt32BigEndian(reader);
-
-    PrimaryVolumeDescriptor.PathTableLocationLE = Bytes::ReadUInt32(reader);
-    PrimaryVolumeDescriptor.OptionalPathTableLocationLE = Bytes::ReadUInt32(reader);
-    PrimaryVolumeDescriptor.PathTableLocationBE = Bytes::ReadUInt32BigEndian(reader);
-    PrimaryVolumeDescriptor.OptionalPathTableLocationBE = Bytes::ReadUInt32BigEndian(reader);
+    if (strncmp(PrimaryVolumeDescriptor.Header.Identifier, "CD001", 5) != 0) {
+        throw std::runtime_error("Invalid Primary Volume Descriptor.");
+    }
 
     DirectoryRecord rootDirRecord;
     if (!TryReadDirectoryRecord(rootDirRecord)) {
         throw std::runtime_error("Failed to read root directory record.");
     }
-    PrimaryVolumeDescriptor.RootDirectoryRecord = new DirectoryRecord(rootDirRecord);
+    PrimaryVolumeDescriptor.RootDirectoryRecord = rootDirRecord;
 
     std::cout << "Primary Volume Descriptor read successfully." << std::endl;
 }
@@ -93,7 +63,6 @@ void ISO::ReadPathTable() {
     int64_t pathTableOffset = pathTableLocation * PrimaryVolumeDescriptor.LogicalBlockSize.LittleEndian;
 
     reader.seekg(pathTableOffset, std::ios::beg);
-
     PathTableEntries.clear();
     int64_t bytesRead = 0;
 
@@ -106,8 +75,7 @@ void ISO::ReadPathTable() {
         if (isBigEndian) {
             entry.ExtentLocation = Bytes::ReadUInt32BigEndian(reader);
             entry.ParentDirectoryNumber = Bytes::ReadUInt16BigEndian(reader);
-        }
-        else {
+        } else {
             entry.ExtentLocation = Bytes::ReadUInt32(reader);
             entry.ParentDirectoryNumber = Bytes::ReadUInt16(reader);
         }
@@ -123,8 +91,7 @@ void ISO::ReadPathTable() {
                 reader.ignore(1);
                 bytesRead++;
             }
-        }
-        else {
+        } else {
             entry.DirectoryIdentifier.clear();
         }
 
@@ -143,44 +110,66 @@ void ISO::BuildDirectoryRecords() {
         throw std::runtime_error("PathTableEntries are empty. Unable to build directory records.");
     }
 
+    std::unordered_set<std::string> seenEntries;
+    std::vector<std::pair<std::string, DirectoryRecord>> allRecords;
+
     for (const auto& pathEntry : PathTableEntries) {
         std::string fullPath = GetFullPath(pathEntry);
         reader.seekg(pathEntry.ExtentLocation * PrimaryVolumeDescriptor.LogicalBlockSize.Value(), std::ios::beg);
 
-        DirectoryRecord dirRecord;
-        if (!TryReadDirectoryRecord(dirRecord)) {
-            continue;
-        }
-
-        uint32_t dirDataLength = dirRecord.DataLength.Value();
-        reader.seekg(pathEntry.ExtentLocation * PrimaryVolumeDescriptor.LogicalBlockSize.Value(), std::ios::beg);
-
+        uint32_t dirDataLength = PrimaryVolumeDescriptor.LogicalBlockSize.Value();
         auto records = ReadDirectoryRecords(dirDataLength);
 
-        for (const auto& record : records) {
-            std::string recordName = record.FileIdentifier;
+        for (auto& record : records) {
+            std::string recordName(record.FileIdentifier, record.FileIdentifierLength);
+
+            // Ensure the record name is valid
+            if (recordName.empty() || recordName == "." || recordName == "..") {
+                continue;
+            }
+
+            // Handle ISO-specific versioning like ";1"
             size_t versionSeparatorIndex = recordName.find(';');
             if (versionSeparatorIndex != std::string::npos) {
                 recordName = recordName.substr(0, versionSeparatorIndex);
             }
 
-            recordName = recordName.erase(recordName.find_last_not_of('\0') + 1);
-            recordName = recordName.erase(recordName.find_last_not_of('.') + 1);
-
-            if (recordName == "." || recordName == ".." || recordName == "\0" || recordName == "\\" || recordName == ".\\") {
-                continue;
-            }
-
+            // Trim null characters and handle periods appropriately
+            recordName.erase(std::remove(recordName.begin(), recordName.end(), '\0'), recordName.end());
+            
             std::string recordPath = std::filesystem::path(fullPath).append(recordName).string();
             std::replace(recordPath.begin(), recordPath.end(), '/', '\\');
-            recordPath = recordPath.erase(recordPath.find_last_not_of('\\') + 1);
+            recordPath.erase(std::find_if(recordPath.rbegin(), recordPath.rend(), [](unsigned char ch) {
+                return ch != '\\';
+            }).base(), recordPath.end());
 
-            DirectoryRecords[recordPath] = record;
-            std::cout << "Record: " << recordPath << " at LBA " << record.ExtentLocation.Value() << ", IsFile: " << record.IsFile() << std::endl;
+            // Add to the list of all records
+            allRecords.emplace_back(recordPath, record);
         }
     }
 
+    // Separate records into directories and files
+    for (const auto& recordPair : allRecords) {
+        const auto& recordPath = recordPair.first;
+        const auto& record = recordPair.second;
+
+        if (!seenEntries.insert(recordPath).second) {
+            continue; // Skip duplicates
+        }
+
+        if (record.IsDirectory()) {
+            DirectoryRecords[recordPath] = record;
+        } else {
+            FileRecords[recordPath] = record;
+        }
+        std::cout << "Record: " << recordPath << " at LBA " << record.ExtentLocation.Value() << ", IsDirectory: " << record.IsDirectory() << ", IsFile: " << !record.IsDirectory() << std::endl;
+    }
+
     std::cout << "Directory records built successfully." << std::endl;
+    std::cout << "File Records count: " << FileRecords.size() << std::endl;
+    for (const auto& fileRecord : FileRecords) {
+        std::cout << "File: " << fileRecord.first << " Size: " << fileRecord.second.DataLength.Value() << " bytes" << std::endl;
+    }
 }
 
 std::string ISO::GetFullPath(const PathTableEntry& entry) {
@@ -199,8 +188,6 @@ std::string ISO::GetFullPath(const PathTableEntry& entry) {
 }
 
 DirectoryRecord ISO::ReadDirectoryRecord() {
-    int64_t startPos = reader.tellg();
-
     DirectoryRecord dirRecord;
     dirRecord.Length = reader.get();
     if (dirRecord.Length == 0) {
@@ -220,26 +207,19 @@ DirectoryRecord ISO::ReadDirectoryRecord() {
     dirRecord.VolumeSequenceNumber.BigEndian = Bytes::ReadUInt16BigEndian(reader);
     dirRecord.FileIdentifierLength = reader.get();
 
-    std::vector<char> idBuffer(dirRecord.FileIdentifierLength);
-    reader.read(idBuffer.data(), dirRecord.FileIdentifierLength);
-    std::copy(idBuffer.begin(), idBuffer.end(), dirRecord.FileIdentifier);
+    reader.read(dirRecord.FileIdentifier, dirRecord.FileIdentifierLength);
+    dirRecord.FileIdentifier[dirRecord.FileIdentifierLength] = '\0'; // Null-terminate
 
     if ((dirRecord.FileIdentifierLength & 1) == 0) {
         reader.ignore(1);
     }
 
-    int64_t endPos = startPos + dirRecord.Length;
-    reader.seekg(endPos, std::ios::beg);
-
     return dirRecord;
 }
 
 bool ISO::TryReadDirectoryRecord(DirectoryRecord& dirRecord) {
-    int64_t startPos = reader.tellg();
     dirRecord.Length = reader.get();
-
     if (dirRecord.Length == 0) {
-        dirRecord = {};
         return false;
     }
 
@@ -256,16 +236,12 @@ bool ISO::TryReadDirectoryRecord(DirectoryRecord& dirRecord) {
     dirRecord.VolumeSequenceNumber.BigEndian = Bytes::ReadUInt16BigEndian(reader);
     dirRecord.FileIdentifierLength = reader.get();
 
-    std::vector<char> idBuffer(dirRecord.FileIdentifierLength);
-    reader.read(idBuffer.data(), dirRecord.FileIdentifierLength);
-    std::copy(idBuffer.begin(), idBuffer.end(), dirRecord.FileIdentifier);
+    reader.read(dirRecord.FileIdentifier, dirRecord.FileIdentifierLength);
+    dirRecord.FileIdentifier[dirRecord.FileIdentifierLength] = '\0'; // Null-terminate
 
     if ((dirRecord.FileIdentifierLength & 1) == 0) {
         reader.ignore(1);
     }
-
-    int64_t endPos = startPos + dirRecord.Length;
-    reader.seekg(endPos, std::ios::beg);
 
     return true;
 }
@@ -275,31 +251,13 @@ std::vector<DirectoryRecord> ISO::ReadDirectoryRecords(uint32_t directorySize) {
     int64_t bytesRead = 0;
 
     while (bytesRead < directorySize) {
-        int64_t recordStartPosition = reader.tellg();
-        uint8_t length = reader.get();
-        bytesRead += 1;
-
-        if (length == 0) {
-            int64_t positionInSector = bytesRead % PrimaryVolumeDescriptor.LogicalBlockSize.Value();
-            if (positionInSector != 0) {
-                int64_t padding = PrimaryVolumeDescriptor.LogicalBlockSize.Value() - positionInSector;
-                if (padding != PrimaryVolumeDescriptor.LogicalBlockSize.Value()) {
-                    reader.seekg(padding, std::ios::cur);
-                    bytesRead += padding;
-                }
-            }
+        DirectoryRecord record;
+        if (!TryReadDirectoryRecord(record)) {
             break;
         }
 
-        reader.seekg(-1, std::ios::cur);
-        int64_t beforeReadPos = reader.tellg();
-        DirectoryRecord record = ReadDirectoryRecord();
-        int64_t afterReadPos = reader.tellg();
-
-        bytesRead += afterReadPos - beforeReadPos;
         records.push_back(record);
-
-        std::cout << "Read DirectoryRecord: Name='" << record.FileIdentifier << "', Length=" << static_cast<int>(record.Length) << ", IsFile=" << record.IsFile() << ", BytesRead=" << bytesRead << std::endl;
+        bytesRead += record.Length;
     }
 
     return records;

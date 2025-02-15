@@ -19,6 +19,10 @@ enum class FileFlags : uint8_t {
     MultiExtent = 1 << 7
 };
 
+constexpr bool HasFlags(FileFlags value, FileFlags flag) {
+    return (static_cast<uint8_t>(value) & static_cast<uint8_t>(flag)) != 0;
+}
+
 struct DirectoryRecord {
     uint8_t Length;
     uint8_t ExtendedAttributeRecordLength;
@@ -30,10 +34,10 @@ struct DirectoryRecord {
     uint8_t InterleaveGapSize;
     BothEndianUInt16 VolumeSequenceNumber;
     uint8_t FileIdentifierLength;
-    char FileIdentifier[256];
+    char FileIdentifier[256]; // Ensure buffer is large enough for file names
 
-    bool IsFile() const {
-        return (static_cast<uint8_t>(FileFlags) & static_cast<uint8_t>(FileFlags::Directory)) == static_cast<uint8_t>(FileFlags::None);
+    bool IsDirectory() const {
+        return HasFlags(FileFlags, FileFlags::Directory);
     }
 
     uint32_t GetSize() const {

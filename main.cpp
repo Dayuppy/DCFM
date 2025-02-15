@@ -4,7 +4,7 @@
 int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) {
     MainWindow mainWindow(hInstance);
 
-    if (!mainWindow.Create(L"ISO Extractor", 800, 600)) {
+    if (!mainWindow.Create(L"Dark Cloud File Manager", 800, 600)) {
         return 0;
     }
 
@@ -17,4 +17,10 @@ int APIENTRY wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmd
     }
 
     return (int)msg.wParam;
+}
+
+int main(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow) 
+{
+    wWinMain(hInstance, hPrevInstance, lpCmdLine, 1);
+    return 0;
 }

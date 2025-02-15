@@ -8,6 +8,10 @@
 #include <memory>
 #include "ISO9660.h"
 #include "Bytes.h"
+#include "DirectoryRecord.h"
+#include "VolumeDescriptorHeader.h"
+#include "PrimaryVolumeDescriptor.h"
+#include "AnchorVolumeDescriptor.h"
 
 class ISO {
 public:
@@ -18,6 +22,7 @@ public:
     std::vector<uint8_t> ReadFileData(const DirectoryRecord& fileRecord);
     std::string GetFileName() const { return isoFileName; }
     const std::unordered_map<std::string, DirectoryRecord>& GetDirectoryRecords() const { return DirectoryRecords; }
+    const std::unordered_map<std::string, DirectoryRecord>& GetFileRecords() const { return FileRecords; }
 
 private:
     void ReadPrimaryVolumeDescriptor();
@@ -34,7 +39,8 @@ private:
     PrimaryVolumeDescriptor PrimaryVolumeDescriptor;
     std::vector<PathTableEntry> PathTableEntries;
     std::unordered_map<std::string, DirectoryRecord> DirectoryRecords;
+    std::unordered_map<std::string, DirectoryRecord> FileRecords;
     std::string isoFileName;
-}; 
+};
 
 #endif //ISO_H

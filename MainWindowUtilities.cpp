@@ -18,6 +18,7 @@ void MainWindowUtilities::LoadIsoAndDisplayTree(HWND hwnd, HWND hwndTreeView, HW
         iso->LoadISO();
         std::wcout << L"Loaded ISO: " << isoPath << std::endl;
         std::wcout << L"Directory Records count: " << iso->GetDirectoryRecords().size() << std::endl;
+        std::wcout << L"File Records count: " << iso->GetFileRecords().size() << std::endl;
 
         // Clear the TreeView and ListView
         TreeView_DeleteAllItems(hwndTreeView);
@@ -29,7 +30,7 @@ void MainWindowUtilities::LoadIsoAndDisplayTree(HWND hwnd, HWND hwndTreeView, HW
         // Populate TreeView
         PopulateTreeView(hwndTreeView, iso, isoName);
 
-        // Populate ListView
+        // Populate ListView with the root directory files
         PopulateListView(hwndListView, iso, isoName);
     }
     catch (const std::exception& ex) {
@@ -54,38 +55,39 @@ void MainWindowUtilities::PopulateTreeView(HWND hwndTreeView, const std::unique_
         const auto& recordPathStr = recordPair.first;
         const auto& record = recordPair.second;
 
-        if (record.IsFile()) continue;
+        if (record.IsDirectory()) {
+            std::wstring path = stringToWstring(recordPathStr);
+            std::replace(path.begin(), path.end(), L'/', L'\\');
 
-        std::wstring path = stringToWstring(recordPathStr);
-        std::replace(path.begin(), path.end(), L'/', L'\\');
+            std::wstring fullPath = isoName;
+            HTREEITEM hParent = hRoot;
 
-        std::wstring fullPath = isoName;
-        HTREEITEM hParent = hRoot;
+            size_t start = 0;
+            while (true) {
+                size_t pos = path.find(L'\\', start);
+                std::wstring folder = (pos == std::wstring::npos) ? path.substr(start) : path.substr(start, pos - start);
 
-        size_t start = 0;
-        while (true) {
-            size_t pos = path.find(L'\\', start);
-            std::wstring folder = (pos == std::wstring::npos) ? path.substr(start) : path.substr(start, pos - start);
+                if (folder.empty()) break;
 
-            if (folder.empty()) break;
+                fullPath += L"\\" + folder;
+                if (treeItems.find(fullPath) == treeItems.end()) {
+                    TVINSERTSTRUCT childTvis = { 0 };
+                    childTvis.hParent = hParent;
+                    childTvis.hInsertAfter = TVI_SORT;
+                    childTvis.item.mask = TVIF_TEXT;
+                    std::wstring folderCopy = folder; // Create a copy to avoid dangling pointer
+                    childTvis.item.pszText = const_cast<LPWSTR>(folderCopy.c_str());
+                    HTREEITEM hItem = TreeView_InsertItem(hwndTreeView, &childTvis);
+                    treeItems[fullPath] = hItem;
+                    hParent = hItem;
+                }
+                else {
+                    hParent = treeItems[fullPath];
+                }
 
-            fullPath += L"\\" + folder;
-            if (treeItems.find(fullPath) == treeItems.end()) {
-                TVINSERTSTRUCT childTvis = { 0 };
-                childTvis.hParent = hParent;
-                childTvis.hInsertAfter = TVI_SORT;
-                childTvis.item.mask = TVIF_TEXT;
-                childTvis.item.pszText = const_cast<LPWSTR>(folder.c_str());
-                HTREEITEM hItem = TreeView_InsertItem(hwndTreeView, &childTvis);
-                treeItems[fullPath] = hItem;
-                hParent = hItem;
+                if (pos == std::wstring::npos) break;
+                start = pos + 1;
             }
-            else {
-                hParent = treeItems[fullPath];
-            }
-
-            if (pos == std::wstring::npos) break;
-            start = pos + 1;
         }
     }
 }
@@ -97,36 +99,44 @@ void MainWindowUtilities::PopulateListView(HWND hwndListView, const std::unique_
     lvi.mask = LVIF_TEXT;
     lvi.iItem = 0;
 
-    for (const auto& recordPair : iso->GetDirectoryRecords()) {
-        const auto& recordPath = recordPair.first;
-        const auto& record = recordPair.second;
+    auto populateList = [&](const std::unordered_map<std::string, DirectoryRecord>& records) {
+        for (const auto& recordPair : records) {
+            const auto& recordPath = recordPair.first;
+            const auto& record = recordPair.second;
 
-        std::wstring parentPath = std::filesystem::path(recordPath.begin(), recordPath.end()).parent_path().wstring();
-        if (parentPath == folderPath && record.IsFile()) {
-            lvi.iSubItem = 0;
-            lvi.pszText = const_cast<LPWSTR>(std::filesystem::path(recordPath.begin(), recordPath.end()).filename().c_str());
-            ListView_InsertItem(hwndListView, &lvi);
+            std::wstring parentPath = std::filesystem::path(recordPath.begin(), recordPath.end()).parent_path().wstring();
+            if (parentPath == folderPath) {
+                std::wstring fileName = std::filesystem::path(recordPath.begin(), recordPath.end()).filename().wstring(); // Create a copy to avoid dangling pointer
+                lvi.iSubItem = 0;
+                lvi.pszText = const_cast<LPWSTR>(fileName.c_str());
+                ListView_InsertItem(hwndListView, &lvi);
 
-            lvi.iSubItem = 1;
-            lvi.pszText = const_cast<LPWSTR>(stringToWstring(recordPath).c_str());
-            ListView_SetItem(hwndListView, &lvi);
+                std::wstring recordPathCopy = stringToWstring(recordPath); // Create a copy to avoid dangling pointer
+                lvi.iSubItem = 1;
+                lvi.pszText = const_cast<LPWSTR>(recordPathCopy.c_str());
+                ListView_SetItem(hwndListView, &lvi);
 
-            lvi.iSubItem = 2;
-            lvi.pszText = const_cast<LPWSTR>(std::to_wstring(record.GetSize()).c_str());
-            ListView_SetItem(hwndListView, &lvi);
+                std::wstring fileSize = std::to_wstring(record.DataLength.Value()); // Create a copy to avoid dangling pointer
+                lvi.iSubItem = 2;
+                lvi.pszText = const_cast<LPWSTR>(fileSize.c_str());
+                ListView_SetItem(hwndListView, &lvi);
 
-            std::wstring dateTime = stringToWstring(record.GetFormattedDateTime());
-            lvi.iSubItem = 3;
-            lvi.pszText = const_cast<LPWSTR>(dateTime.c_str());
-            ListView_SetItem(hwndListView, &lvi);
+                std::wstring dateTime = stringToWstring(record.GetFormattedDateTime());
+                lvi.iSubItem = 3;
+                lvi.pszText = const_cast<LPWSTR>(dateTime.c_str());
+                ListView_SetItem(hwndListView, &lvi);
 
-            lvi.iSubItem = 4;
-            lvi.pszText = const_cast<LPWSTR>(dateTime.c_str());
-            ListView_SetItem(hwndListView, &lvi);
+                lvi.iSubItem = 4;
+                lvi.pszText = const_cast<LPWSTR>(dateTime.c_str());
+                ListView_SetItem(hwndListView, &lvi);
 
-            lvi.iItem++;
+                lvi.iItem++;
+            }
         }
-    }
+        };
+
+    populateList(iso->GetDirectoryRecords());
+    populateList(iso->GetFileRecords());
 }
 
 std::wstring MainWindowUtilities::GetFullPathFromTreeViewItem(HWND hwndTreeView, HTREEITEM hItem) {
@@ -141,6 +151,7 @@ std::wstring MainWindowUtilities::GetFullPathFromTreeViewItem(HWND hwndTreeView,
     while (hItem != nullptr) {
         item.hItem = hItem;
         TreeView_GetItem(hwndTreeView, &item);
+        text[sizeof(text) / sizeof(text[0]) - 1] = '\0'; // Ensure null-termination
         fullPath = item.pszText + std::wstring(L"\\") + fullPath;
         hItem = TreeView_GetParent(hwndTreeView, hItem);
     }

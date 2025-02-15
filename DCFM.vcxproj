@@ -127,7 +127,7 @@
       <CompileAs>CompileAsCpp</CompileAs>
     </ClCompile>
     <Link>
-      <SubSystem>Windows</SubSystem>
+      <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -145,6 +145,7 @@
     <ClCompile Include="MainWindowUtilities.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AnchorVolumeDescriptor.h" />
     <ClInclude Include="BothEndianUInt32.h" />
     <ClInclude Include="Bytes.h" />
     <ClInclude Include="DirectoryRecord.h" />
