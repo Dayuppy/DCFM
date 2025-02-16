@@ -3,13 +3,12 @@
 #include <iostream>
 #include <stdexcept>
 #include <filesystem>
-#include <sstream>
-#include <iomanip>
-#include <ctime>
 #include <unordered_set>
 #include <algorithm>
+#include <Windows.h>
 
-ISO::ISO(const std::string& isoPath) : reader(isoPath, std::ios::binary), isoFileName(isoPath) {
+ISO::ISO(const std::string& isoPath)
+    : reader(isoPath, std::ios::binary), isoFileName(isoPath) {
     if (!reader.is_open()) {
         throw std::runtime_error("Failed to open ISO file.");
     }
@@ -59,7 +58,9 @@ void ISO::ReadPathTable() {
         throw std::runtime_error("No valid Path Table Location found.");
     }
 
-    uint32_t pathTableSize = isBigEndian ? PrimaryVolumeDescriptor.PathTableSize.BigEndian : PrimaryVolumeDescriptor.PathTableSize.LittleEndian;
+    uint32_t pathTableSize = isBigEndian
+        ? PrimaryVolumeDescriptor.PathTableSize.BigEndian
+        : PrimaryVolumeDescriptor.PathTableSize.LittleEndian;
     int64_t pathTableOffset = pathTableLocation * PrimaryVolumeDescriptor.LogicalBlockSize.LittleEndian;
 
     reader.seekg(pathTableOffset, std::ios::beg);
@@ -75,7 +76,8 @@ void ISO::ReadPathTable() {
         if (isBigEndian) {
             entry.ExtentLocation = Bytes::ReadUInt32BigEndian(reader);
             entry.ParentDirectoryNumber = Bytes::ReadUInt16BigEndian(reader);
-        } else {
+        }
+        else {
             entry.ExtentLocation = Bytes::ReadUInt32(reader);
             entry.ParentDirectoryNumber = Bytes::ReadUInt16(reader);
         }
@@ -91,7 +93,8 @@ void ISO::ReadPathTable() {
                 reader.ignore(1);
                 bytesRead++;
             }
-        } else {
+        }
+        else {
             entry.DirectoryIdentifier.clear();
         }
 
@@ -105,64 +108,70 @@ void ISO::ReadPathTable() {
     std::cout << "Path Table read successfully." << std::endl;
 }
 
+std::string ISO::GetRootFolderName() const {
+    return std::filesystem::path(isoFileName).stem().string();
+}
+
+std::string ISO::GetFullPath(const PathTableEntry& entry) {
+    // Base case: if this entry's parent is the root (ISO spec defines the root's ParentDirectoryNumber as 1),
+    // then return the ISO's root folder name plus the entry's identifier (if nonempty).
+    if (entry.ParentDirectoryNumber == 1) {
+        std::string root = GetRootFolderName();
+        if (!entry.DirectoryIdentifier.empty() &&
+            entry.DirectoryIdentifier != "\0" &&
+            entry.DirectoryIdentifier != "\u0001")
+        {
+            return root + "\\" + entry.DirectoryIdentifier;
+        }
+        return root;
+    }
+
+    int parentIndex = entry.ParentDirectoryNumber - 1;
+    if (parentIndex < 0 || parentIndex >= PathTableEntries.size()) {
+        throw std::runtime_error("Invalid ParentDirectoryNumber in path table entry.");
+    }
+
+    const auto& parentEntry = PathTableEntries[parentIndex];
+    std::filesystem::path fullPath = std::filesystem::path(GetFullPath(parentEntry)) / entry.DirectoryIdentifier;
+    return fullPath.string();
+}
+
 void ISO::BuildDirectoryRecords() {
     if (PathTableEntries.empty()) {
         throw std::runtime_error("PathTableEntries are empty. Unable to build directory records.");
     }
 
-    std::unordered_set<std::string> seenEntries;
-    std::vector<std::pair<std::string, DirectoryRecord>> allRecords;
-
+    std::unordered_set<uint32_t> seenLBAs;
     for (const auto& pathEntry : PathTableEntries) {
         std::string fullPath = GetFullPath(pathEntry);
-        reader.seekg(pathEntry.ExtentLocation * PrimaryVolumeDescriptor.LogicalBlockSize.Value(), std::ios::beg);
 
+        reader.seekg(pathEntry.ExtentLocation * PrimaryVolumeDescriptor.LogicalBlockSize.Value(), std::ios::beg);
         uint32_t dirDataLength = PrimaryVolumeDescriptor.LogicalBlockSize.Value();
         auto records = ReadDirectoryRecords(dirDataLength);
 
-        for (auto& record : records) {
+        for (const auto& record : records) {
             std::string recordName(record.FileIdentifier, record.FileIdentifierLength);
+            std::cout << "Raw Record Name: [" << recordName << "]" << std::endl;
 
-            // Ensure the record name is valid
-            if (recordName.empty() || recordName == "." || recordName == "..") {
+            // Build the record path relative to the directory.
+            std::string recordPath = (std::filesystem::path(fullPath) / recordName).string();
+            if (!recordPath.empty() && recordPath.back() == '\\') {
+                recordPath.pop_back();
+            }
+
+            if (!seenLBAs.insert(record.ExtentLocation.Value()).second) {
                 continue;
             }
 
-            // Handle ISO-specific versioning like ";1"
-            size_t versionSeparatorIndex = recordName.find(';');
-            if (versionSeparatorIndex != std::string::npos) {
-                recordName = recordName.substr(0, versionSeparatorIndex);
+            if (record.IsDirectory()) {
+                DirectoryRecords[recordPath] = record;
+                //std::cout << "Folder Record: " << recordPath << " at LBA " << record.ExtentLocation.Value() << std::endl;
             }
-
-            // Trim null characters and handle periods appropriately
-            recordName.erase(std::remove(recordName.begin(), recordName.end(), '\0'), recordName.end());
-            
-            std::string recordPath = std::filesystem::path(fullPath).append(recordName).string();
-            std::replace(recordPath.begin(), recordPath.end(), '/', '\\');
-            recordPath.erase(std::find_if(recordPath.rbegin(), recordPath.rend(), [](unsigned char ch) {
-                return ch != '\\';
-            }).base(), recordPath.end());
-
-            // Add to the list of all records
-            allRecords.emplace_back(recordPath, record);
+            else {
+                FileRecords[recordPath] = record;
+                //std::cout << "File Record: " << recordPath << " at LBA " << record.ExtentLocation.Value() << std::endl;
+            }
         }
-    }
-
-    // Separate records into directories and files
-    for (const auto& recordPair : allRecords) {
-        const auto& recordPath = recordPair.first;
-        const auto& record = recordPair.second;
-
-        if (!seenEntries.insert(recordPath).second) {
-            continue; // Skip duplicates
-        }
-
-        if (record.IsDirectory()) {
-            DirectoryRecords[recordPath] = record;
-        } else {
-            FileRecords[recordPath] = record;
-        }
-        std::cout << "Record: " << recordPath << " at LBA " << record.ExtentLocation.Value() << ", IsDirectory: " << record.IsDirectory() << ", IsFile: " << !record.IsDirectory() << std::endl;
     }
 
     std::cout << "Directory records built successfully." << std::endl;
@@ -172,52 +181,8 @@ void ISO::BuildDirectoryRecords() {
     }
 }
 
-std::string ISO::GetFullPath(const PathTableEntry& entry) {
-    if (entry.ParentDirectoryNumber < 1 || entry.ParentDirectoryNumber > PathTableEntries.size()) {
-        throw std::runtime_error("Invalid ParentDirectoryNumber in path table entry.");
-    }
-
-    int parentIndex = entry.ParentDirectoryNumber - 1;
-    const auto& parentEntry = PathTableEntries[parentIndex];
-
-    if (parentEntry.DirectoryIdentifier == entry.DirectoryIdentifier) {
-        return entry.DirectoryIdentifier.empty() || entry.DirectoryIdentifier == "\0" || entry.DirectoryIdentifier == "\u0001" ? "." : entry.DirectoryIdentifier;
-    }
-
-    return std::filesystem::path(GetFullPath(parentEntry)).append(entry.DirectoryIdentifier).string();
-}
-
-DirectoryRecord ISO::ReadDirectoryRecord() {
-    DirectoryRecord dirRecord;
-    dirRecord.Length = reader.get();
-    if (dirRecord.Length == 0) {
-        return dirRecord;
-    }
-
-    dirRecord.ExtendedAttributeRecordLength = reader.get();
-    dirRecord.ExtentLocation.LittleEndian = Bytes::ReadUInt32(reader);
-    dirRecord.ExtentLocation.BigEndian = Bytes::ReadUInt32BigEndian(reader);
-    dirRecord.DataLength.LittleEndian = Bytes::ReadUInt32(reader);
-    dirRecord.DataLength.BigEndian = Bytes::ReadUInt32BigEndian(reader);
-    reader.read(reinterpret_cast<char*>(dirRecord.RecordingDateTime), 7);
-    dirRecord.FileFlags = static_cast<FileFlags>(reader.get());
-    dirRecord.FileUnitSize = reader.get();
-    dirRecord.InterleaveGapSize = reader.get();
-    dirRecord.VolumeSequenceNumber.LittleEndian = Bytes::ReadUInt16(reader);
-    dirRecord.VolumeSequenceNumber.BigEndian = Bytes::ReadUInt16BigEndian(reader);
-    dirRecord.FileIdentifierLength = reader.get();
-
-    reader.read(dirRecord.FileIdentifier, dirRecord.FileIdentifierLength);
-    dirRecord.FileIdentifier[dirRecord.FileIdentifierLength] = '\0'; // Null-terminate
-
-    if ((dirRecord.FileIdentifierLength & 1) == 0) {
-        reader.ignore(1);
-    }
-
-    return dirRecord;
-}
-
 bool ISO::TryReadDirectoryRecord(DirectoryRecord& dirRecord) {
+    int64_t startPos = reader.tellg();
     dirRecord.Length = reader.get();
     if (dirRecord.Length == 0) {
         return false;
@@ -237,29 +202,31 @@ bool ISO::TryReadDirectoryRecord(DirectoryRecord& dirRecord) {
     dirRecord.FileIdentifierLength = reader.get();
 
     reader.read(dirRecord.FileIdentifier, dirRecord.FileIdentifierLength);
-    dirRecord.FileIdentifier[dirRecord.FileIdentifierLength] = '\0'; // Null-terminate
+    dirRecord.FileIdentifier[dirRecord.FileIdentifierLength] = '\0'; // null-terminate
 
+    // According to ISO 9660, if the File Identifier Length is even, a pad byte is present.
     if ((dirRecord.FileIdentifierLength & 1) == 0) {
         reader.ignore(1);
     }
 
+    int64_t endPos = startPos + dirRecord.Length;
+    reader.seekg(endPos, std::ios::beg);
+
     return true;
 }
+
 
 std::vector<DirectoryRecord> ISO::ReadDirectoryRecords(uint32_t directorySize) {
     std::vector<DirectoryRecord> records;
     int64_t bytesRead = 0;
-
     while (bytesRead < directorySize) {
         DirectoryRecord record;
         if (!TryReadDirectoryRecord(record)) {
             break;
         }
-
         records.push_back(record);
         bytesRead += record.Length;
     }
-
     return records;
 }
 

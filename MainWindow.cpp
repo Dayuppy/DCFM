@@ -127,14 +127,7 @@ LRESULT MainWindow::HandleCommand(WPARAM wParam, LPARAM lParam) {
 LRESULT MainWindow::HandleNotify(LPARAM lParam) {
     LPNMHDR pnmh = (LPNMHDR)lParam;
     if (pnmh->hwndFrom == hwndTreeView_ && pnmh->code == TVN_SELCHANGED) {
-        LPNMTREEVIEW pnmtv = (LPNMTREEVIEW)lParam;
-        HTREEITEM hSelectedItem = pnmtv->itemNew.hItem;
-
-        // Get the full path of the selected folder
-        std::wstring folderPath = MainWindowUtilities::GetFullPathFromTreeViewItem(hwndTreeView_, hSelectedItem);
-
-        // Populate the ListView with the contents of the selected folder
-        MainWindowUtilities::PopulateListView(hwndListView_, iso_, folderPath);
+        MainWindowUtilities::OnTreeViewItemSelectionChanged(hwndTreeView_, hwndListView_, iso_);
     }
     return 0;
 }

@@ -40,3 +40,11 @@ LRESULT MainWindowEventHandler::HandleCommand(HWND hwnd, WPARAM wParam, LPARAM l
     }
     return 0;
 }
+
+LRESULT MainWindowEventHandler::HandleNotify(HWND hwnd, WPARAM wParam, LPARAM lParam, HWND hwndTreeView, HWND hwndListView, const std::unique_ptr<ISO>& iso) {
+    LPNMHDR lpnmhdr = reinterpret_cast<LPNMHDR>(lParam);
+    if (lpnmhdr->hwndFrom == hwndTreeView && lpnmhdr->code == TVN_SELCHANGED) {
+        MainWindowUtilities::OnTreeViewItemSelectionChanged(hwndTreeView, hwndListView, iso);
+    }
+    return 0;
+}

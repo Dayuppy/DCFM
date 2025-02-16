@@ -46,7 +46,7 @@ struct DirectoryRecord {
 
     std::string GetFormattedDateTime() const {
         std::tm tm = {};
-        tm.tm_year = RecordingDateTime[0] + 70; // Years since 1900
+        tm.tm_year = RecordingDateTime[0];
         tm.tm_mon = RecordingDateTime[1] - 1;   // Months since January
         tm.tm_mday = RecordingDateTime[2];
         tm.tm_hour = RecordingDateTime[3];

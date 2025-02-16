@@ -8,10 +8,6 @@
 #include <memory>
 #include "ISO9660.h"
 #include "Bytes.h"
-#include "DirectoryRecord.h"
-#include "VolumeDescriptorHeader.h"
-#include "PrimaryVolumeDescriptor.h"
-#include "AnchorVolumeDescriptor.h"
 
 class ISO {
 public:
@@ -21,6 +17,7 @@ public:
     void LoadISO();
     std::vector<uint8_t> ReadFileData(const DirectoryRecord& fileRecord);
     std::string GetFileName() const { return isoFileName; }
+    std::string GetRootFolderName() const;
     const std::unordered_map<std::string, DirectoryRecord>& GetDirectoryRecords() const { return DirectoryRecords; }
     const std::unordered_map<std::string, DirectoryRecord>& GetFileRecords() const { return FileRecords; }
 
@@ -29,10 +26,8 @@ private:
     void ReadPathTable();
     void BuildDirectoryRecords();
     std::string GetFullPath(const PathTableEntry& entry);
-    DirectoryRecord ReadDirectoryRecord();
     bool TryReadDirectoryRecord(DirectoryRecord& dirRecord);
     std::vector<DirectoryRecord> ReadDirectoryRecords(uint32_t directorySize);
-
     void Close();
 
     std::ifstream reader;
@@ -43,4 +38,4 @@ private:
     std::string isoFileName;
 };
 
-#endif //ISO_H
+#endif // ISO_H
